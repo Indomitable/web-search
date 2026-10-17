@@ -1,4 +1,5 @@
 mod duckduckgo;
+mod html;
 
 use clap::ValueEnum;
 

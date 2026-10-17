@@ -5,7 +5,7 @@ use reqwest::blocking::Client;
 use scraper::{Html, Selector};
 use url::Url;
 
-use super::SearchProvider;
+use super::{SearchProvider, html::rich_text};
 use crate::result::SearchResult;
 
 const ENDPOINT: &str = "https://html.duckduckgo.com/html/";
@@ -55,6 +55,7 @@ pub fn parse(html: &str) -> anyhow::Result<Vec<SearchResult>> {
     let container = Selector::parse(".serp__results, #links").unwrap();
     let result = Selector::parse("div.result").unwrap();
     let link = Selector::parse("a.result__a").unwrap();
+    let snippet = Selector::parse(".result__snippet").unwrap();
 
     if doc.select(&container).next().is_none() {
         bail!("unexpected response from DuckDuckGo (possibly rate limited); try again later");
@@ -67,7 +68,8 @@ pub fn parse(html: &str) -> anyhow::Result<Vec<SearchResult>> {
             let a = r.select(&link).next()?;
             let title = a.text().collect::<String>().trim().to_string();
             let url = resolve_href(a.value().attr("href")?)?;
-            (!title.is_empty()).then_some(SearchResult { title, url })
+            let description = r.select(&snippet).next().map(rich_text).unwrap_or_default();
+            (!title.is_empty()).then_some(SearchResult { title, url, description })
         })
         .collect();
     Ok(results)
@@ -111,6 +113,11 @@ mod tests {
         assert_eq!(results.len(), 10);
         assert_eq!(results[0].url, "https://en.wikipedia.org/wiki/Banana");
         assert!(results.iter().all(|r| !r.title.is_empty() && r.url.starts_with("http")));
+        assert!(results.iter().all(|r| !r.description.is_empty()));
+        let first = &results[0].description;
+        assert_eq!(first[0].text, "A");
+        assert!(!first[0].bold);
+        assert_eq!((first[1].text.as_str(), first[1].bold), (" banana", true));
     }
 
     #[test]
@@ -120,7 +127,7 @@ mod tests {
             <div class="result"><a class="result__a" href="https://real.example">Real</a></div>
         </div>"#;
         let results = parse(html).unwrap();
-        assert_eq!(results, vec![SearchResult { title: "Real".into(), url: "https://real.example".into() }]);
+        assert_eq!(results, vec![SearchResult { title: "Real".into(), url: "https://real.example".into(), description: vec![] }]);
     }
 
     #[test]
